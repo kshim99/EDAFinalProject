@@ -1,0 +1,118 @@
+---
+title: "EDAFinalProject"
+author: "Kyu Min Shim"
+date: "2023-04-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Total word count: 999
+
+## Task 1
+
+```{r}
+data = read.csv("UK_Accident.csv")
+summary(data)
+```
+
+The dataset I chose contains 33 features of 1.5 million road accidents in the UK between the years 2005 and 2014. One topic I want to consider is the relationship between accident location (given by longitude and lattitude) and the number of casualties, as well as the relationship between accident location and the number of vehicles involved. This would provide us locations in UK where accidents are more likely to occur, possibly due to the local weather/ground/social conditions, and suggest additions of more road safety measures in the area. 
+
+Another topic I want to consider is predicting accident severity based on various road conditions such as the speed-limit, road type, light conditions, weather conditions and road surface conditions. This can provide the knowledge of when drivers should take extra caution to avoid highly severe accidents. Since light conditions and weather conditions are string variables given in sentences, I would perform data mining on these variables to identify and categorize each entry by their key words. 
+
+## Task 2
+
+This section shows the code used to clean the data in preparation for other mandatory tasks. I am only interest in the most recent year data, since road conditions may have changed over time which may impact the relationship between variables. After filtering for the most recent year data (2014), I will choose the 5 variables that I believe are the most important in explaining a target variable of Accident\_Severity: Number\_of\_Vehicles, Number\_of\_Casualties, Speed\_Limit, Junction\_Control, and Road\_Type. Then, I will handle missing data by getting rid of accidents that do not have all 6 variables (including Accident\_Severity) and factorizing the categorical variables. Also, column names will be shortened for better visualization in ggpairs plot.
+
+```{r}
+myvars = c("Accident_Severity","Number_of_Vehicles","Number_of_Casualties",
+           "Speed_limit","Junction_Control","Road_Type")
+subdata = data[data$Year == 2014, ][myvars]
+subdata = na.omit(subdata)
+subdata$Junction_Control = as.factor(subdata$Junction_Control)
+subdata$Road_Type = as.factor(subdata$Road_Type)
+subdata$Accident_Severity = factor(subdata$Accident_Severity, levels=c(1,2,3))
+colnames(subdata) = c("Severity","Cars","Casualties","Speed","Control","Road")
+```
+
+## Task 3
+
+```{r}
+library(ggplot2)
+library(GGally)
+```
+```{r}
+pm = ggpairs(subdata)
+pm
+```
+
+As mentioned in previous task, the 6 variables of choice are Severity (accident severity levels from 1 to 3), Cars (number of cars involved in accident), Casualties (number of casualties in accident), Speed (speed-limit imposed at the location of the accident), Control (junction-control available at the location of the accident), and Road (type of road where accident occurred). Of these variables, Severity, Cars, Casualties, and Speed are continuous variables (but they are integer valued), and Control and Road are categorical variables. 
+
+In terms of relationships between variables, it appears no explanatory variables have very strong relationship with Severity. It appears that number of cars and casualties in an accident has relatively strong correlation, and it makes sense that if more cars are involved in an accident then more people are hurt. There is also relatively strong correlation between Speed and Casualties as well. 
+
+```{r}
+unique(subdata$Control)
+unique(subdata$Road)
+```
+
+When looking into relationship between categorical variables, it appears that the number of cars and casualties involved in an accident is the highest when the junction-control in place is Giveway or None. This is an intuitive result as less traffic control means people are less cautious. Also, there seems to be higher number of cars involved if the accident takes place on a dual or single carriageway. This result is also intuitive since it is likely for larger accidents to happen on highways.
+
+Observing the histogram of Severity, we can see that most observations have Severity level 3. This is highly skewed distribution of the response variable which may interfere with the validity of models in the following sections. 
+
+## Task 4
+
+```{r}
+library(rpart)
+```
+```{r}
+train_rows = sample(nrow(subdata), size = nrow(subdata) * 0.8)
+train_data = subdata[train_rows,]
+test_data = subdata[-train_rows,]
+fit = rpart(Severity ~. , data = train_data, method = "class", cp=0.0001)
+plot(fit)
+text(fit, use.n=TRUE, all=TRUE, cex=1)
+```
+```{R}
+summary(fit)
+```
+
+The order of importance in the explanatory variables are Cars, Speed, Road, Casualties, and Control. One point of concern is that the distribution of Severity is highly skewed. 
+
+```{r}
+pred = predict(fit, test_data, type="class")
+groundtruth = test_data$Severity
+tab = table(pred, groundtruth)
+tab
+```
+
+Since most of the accidents are classified as 3 on Severity level, it is highly likely that the mode Severity level in each leaf node of the classification tree is 3. Hence, this pushes the model to predict 3 almost all cases. Because there are relatively very few Severity level 1 accidents, the classification tree is not inclined to predict any observations as level 1. 
+
+One simple prediction that can be made following the classification tree is on an accident involving 1 car. This is because the first node splits at Cars < 1.5, and any accidents satisfying this condition is classified into a leaf node with predicted Severity of 3. If an accident has 4 cars on a road where speed-limit was 40, it does not satisfy the first node condition Cars < 1.5 and it does not satisfy the following condition speed >= 40, hence it is assigned to the next leaf node with predicted Severity of 3. 
+
+## Task 6
+
+I will use best subsets for model selection. The continuous variable to predict will be Casualties. Among the explanatory variables, I will include the interaction between Cars and Speed variables. 
+```{r}
+library(leaps)
+```
+```{r}
+subsets = regsubsets(Casualties ~ Severity + Cars + Speed + Control + Road + Cars * Speed, 
+                     data = subdata, nbest = 2)
+plot(subsets, scale="bic")
+```
+
+When selecting a model based on BIC, we choose the model with the lowest BIC. From the result of best subset plot, we can see that the best model consists of Severity, Cars, Speed and the interaction term. We see that one category from Control and two categories from Road are selected but not the rest. Since at least a part of each categorical variable is important in explaining Casualties, we should include both in the model. 
+
+```{r}
+model = lm(Casualties ~ Severity + Cars + Speed + Control + Road + Cars * Speed, 
+           data = subdata)
+step_select = step(model, k=2)
+```
+
+The result is consistent when performing stepwise selection, where the AIC is the lowest when no variable is removed. Hence, the model selection process suggests we should keep all 5 explanatory variables and the interaction term. 
+
+## Task 8
+
+Residual disclosure is a major concern for this dataset. The exact time and location of every accident in UK is available through longitude, latitude, date, and time variables. Especially for large scale accidents, it is likely that many media sources revealed the drivers or passengers involved. Hence, using this dataset and looking for past news articles that covered these accidents, personal information could be identified. Even if their personal information was anonymized on media, it is possible for a third party to identify the people involved in the accident. Assuming the people involved suffered injuries to their body or vehicle, it would be very easy to identify the people by anyone with access to some combination of hospital or insurance databases by matching the accident dates and locations.   
